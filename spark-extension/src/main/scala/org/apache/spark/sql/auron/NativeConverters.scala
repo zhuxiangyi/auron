@@ -87,7 +87,7 @@ import org.apache.auron.spark.configuration.SparkAuronConfiguration
 
 object NativeConverters extends Logging {
 
-  private def sparkAuronConfig: AuronConfiguration =
+  private val sparkAuronConfig: AuronConfiguration =
     AuronAdaptor.getInstance.getAuronConfiguration
   def udfEnabled: Boolean =
     AuronConverters.getBooleanConf("spark.auron.udf.enabled", defaultValue = true)
@@ -99,8 +99,6 @@ object NativeConverters extends Logging {
     AuronConverters.getBooleanConf("spark.auron.decimal.arithOp.enabled", defaultValue = false)
   def datetimeExtractEnabled: Boolean =
     AuronConverters.getBooleanConf("spark.auron.datetime.extract.enabled", defaultValue = false)
-  def castTrimStringEnabled: Boolean =
-    AuronConverters.getBooleanConf("spark.auron.cast.trimString", defaultValue = true)
 
   def scalarTypeSupported(dataType: DataType): Boolean = {
     dataType match {
@@ -469,15 +467,16 @@ object NativeConverters extends Logging {
         }
 
       // cast
-      // not performing native cast for timestamp/dates (will use UDFWrapper instead)
+      // not performing native cast for timestamp (will use UDFWrapper instead)
+      // but allow string to date cast for vectorized date parsing
       case cast: Cast
           if !Seq(cast.dataType, cast.child.dataType).exists(t =>
-            t.isInstanceOf[TimestampType] || t.isInstanceOf[DateType]) =>
+            t.isInstanceOf[TimestampType]) =>
         val castChild =
           if (cast.child.dataType == StringType &&
             (cast.dataType.isInstanceOf[NumericType] || cast.dataType
               .isInstanceOf[BooleanType]) &&
-            castTrimStringEnabled) {
+            sparkAuronConfig.getBoolean(SparkAuronConfiguration.CAST_STRING_TRIM_ENABLE)) {
             // converting Cast(str as num) to StringTrim(Cast(str as num)) if enabled
             StringTrim(cast.child)
           } else {

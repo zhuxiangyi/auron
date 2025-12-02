@@ -276,10 +276,12 @@ fn try_cast_string_array_to_integer(array: &dyn Array, cast_type: &DataType) -> 
 
 fn try_cast_string_array_to_date(array: &dyn Array) -> Result<ArrayRef> {
     let strings = array.as_string::<i32>();
-    let mut converted_values = Vec::with_capacity(strings.len());
-    for s in strings {
-        converted_values.push(s.and_then(|s| to_date(s)));
-    }
+    // Use from_iter for better vectorization - the iterator processes elements in batches
+    // and the compiler can optimize the loop better than manual Vec::push
+    let converted_values: Vec<Option<i32>> = strings
+        .iter()
+        .map(|s| s.and_then(|s| to_date(s)))
+        .collect();
     Ok(Arc::new(Date32Array::from(converted_values)))
 }
 
@@ -630,6 +632,27 @@ mod test {
                 None,
                 None,
                 None,
+            ])
+        );
+    }
+
+    #[test]
+    fn test_string_to_date_2025_10_10() {
+        // Test the specific date string mentioned in the requirement
+        let string_array: ArrayRef = Arc::new(StringArray::from_iter(vec![
+            Some("2025-10-10"),
+            Some("2025-01-01"),
+            Some("2024-12-31"),
+        ]));
+        let casted = cast(&string_array, &DataType::Date32).unwrap();
+        let casted_utf8 = arrow::compute::cast(&casted, &DataType::Utf8).unwrap();
+        let back_to_string = casted_utf8.as_string();
+        assert_eq!(
+            back_to_string,
+            &StringArray::from_iter(vec![
+                Some("2025-10-10"),
+                Some("2025-01-01"),
+                Some("2024-12-31"),
             ])
         );
     }
